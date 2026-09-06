@@ -1,5 +1,6 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
@@ -30,16 +31,23 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
 
     @Override
     public Result queryById(Long id) {
+        //解决缓存击穿问题
+      //Shop shop = queryWithPassThrough(id);
+        Shop shop = queryWithMutex(id);
+
+      return Result.ok(shop);
+    }
+    private Shop queryWithPassThrough(Long id){
         // 从redis中查询商铺信息
         String shopJson = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + id);
         //存在且有信息直接返回
         if (StrUtil.isNotBlank(shopJson)) {
             Shop shop = JSONUtil.toBean(shopJson, Shop.class);
-            return Result.ok(shop);
+            return shop;
         }
         //存在但没有信息，返回失败
         if(shopJson!=null){
-            return Result.fail("商铺不存在");
+            return null;
         }
         //不存在从数据库中查询
         Shop shop = getById(id);
@@ -47,16 +55,69 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         //判断是否存在，不存在返回失败
         if (shop == null) {
             stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
-            return Result.fail("商铺不存在");
+            return null;
         }
 
         //存在保存到redis中
         stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         //返回成功
-        return Result.ok(shop);
+        return shop;
+    }
+    public Shop queryWithMutex(Long id){
+        // 从redis中查询商铺信息
+        String shopJson = stringRedisTemplate.opsForValue().get(RedisConstants.CACHE_SHOP_KEY + id);
+        //存在且有信息直接返回
+        if (StrUtil.isNotBlank(shopJson)) {
+            Shop shop = JSONUtil.toBean(shopJson, Shop.class);
+            return shop;
+        }
+        //存在但没有信息，返回失败
+        if(shopJson!=null){
+            return null;
+        }
+        //不存在从数据库中查询
+         // 获取互斥锁
+        String lockKey=RedisConstants.LOCK_SHOP_KEY+id;
+        Shop shop = null;
+        try {
+            boolean isLock = tryLock(lockKey);
+            //判断是否成功
+            if(!isLock){
+                Thread.sleep(30);
+                return queryWithMutex(id);
+            }
+            //获取锁成功，从数据库中查询
+            shop = getById(id);
+            //模拟重建缓存延时
+            Thread.sleep(200);
+
+            //判断是否存在，不存在返回失败
+            if (shop == null) {
+                stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, "", RedisConstants.CACHE_NULL_TTL, TimeUnit.MINUTES);
+                return null;
+            }
+
+            //存在保存到redis中
+            stringRedisTemplate.opsForValue().set(RedisConstants.CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), RedisConstants.CACHE_SHOP_TTL, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } finally {
+            //释放锁
+            unlock(lockKey);
+        }
+
+        //返回成功
+        return shop;
 
 
+    }
+    private boolean tryLock(String key){
+        Boolean flag= stringRedisTemplate.opsForValue().setIfAbsent(key, "1", RedisConstants.LOCK_SHOP_TTL, TimeUnit.SECONDS);
+        return BooleanUtil.isTrue(flag);
+    }
+    private void unlock(String key){
+        stringRedisTemplate.delete(key);
     }
 
     @Override
