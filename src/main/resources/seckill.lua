@@ -6,6 +6,7 @@
 -- 参数列表
 local voucherId = ARGV[1]   -- 优惠券id（用于判断库存是否充足）
 local userId = ARGV[2]  -- 用户id（用于判断用户是否下过单）
+local orderId = ARGV[3]  -- 订单id（用于判断订单是否已存在）
 -- 构造缓存数据key
 local stockKey = 'seckill:stock:' .. voucherId -- 库存key
 local orderKey = 'seckill:order:' .. voucherId -- 订单key
@@ -24,5 +25,7 @@ end
 redis.call('incrby', stockKey, -1)
 -- 下单（保存用户） sadd orderKey userId
 redis.call('sadd', orderKey, userId)
+-- 发送消息到队列，通知订单服务下单成功
+redis.call('xadd', 'stream.orders', '*','userId', userId, 'voucherId', voucherId, 'id', orderId)
 -- 有下单资格，允许下单，返回0
 return 0
