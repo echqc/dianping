@@ -243,7 +243,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             @Transactional
             public void createSecKillVoucherOrder (VoucherOrder voucherOrder){
                 // 根据用户id和优惠券id查询订单是否存在
-                int count = query().eq("user_id", voucherOrder.getUserId()).eq("voucher_id", voucherOrder.getVoucherId()).count();
+                long count = query().eq("user_id", voucherOrder.getUserId()).eq("voucher_id", voucherOrder.getVoucherId()).count();
                 // 一人一单判断
                 if (count > 0) {
                     // 该用户已经购买过了，不允许下多单
